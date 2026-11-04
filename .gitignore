@@ -218,3 +218,32 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# secrets and credentials
+.env
+.env.*
+*.pem
+*.key
+*credentials*.json
+service-account*.json
+*.tfvars
+terraform.tfstate*
+.terraform/
+
+# data and outputs (data lives in Cloud Storage, not Git)
+data/raw/
+data/processed/
+*.csv
+*.parquet
+*.db
+!data/samples/*.csv
+logs/
+*.log
+
+# caches and environments
+.venv/
+.ipynb_checkpoints/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.DS_Store
