@@ -247,3 +247,4 @@ logs/
 .ruff_cache/
 .mypy_cache/
 .DS_Store
+.local/
