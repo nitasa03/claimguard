@@ -20,10 +20,11 @@ and duplicate matches (invoice numbers, images).
 
 ## Data
 - D5 synthetic documents, degraded into scan-like copies, with planted tampering.
-- D4 CarDD damage photos with planted duplicates (research and education terms;
-  images are never committed to this repo).
-- D6 public OCR sets, for robustness tests only.
-D4 and D6 are blocked until their terms are recorded in the source register.
+- CarDD damage photos with planted duplicates (source register S04; images are
+  never committed to this repo).
+- FUNSD, SROIE and CORD scanned forms and receipts, for OCR robustness tests only
+  (source register S05 to S07).
+  S04 to S07 are blocked until their terms are verified and recorded in the source register.
 
 ## Method
 1. OCR, then schema-based extraction of fields per document template.
