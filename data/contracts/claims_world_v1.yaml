@@ -1,0 +1,85 @@
+contract: claims_world
+version: 1.0.0
+producer: synthetic generator (#9)
+consumers: [ingestion (#12), validation (#13), silver (#14)]
+classification: confidential   # synthetic, but handled as if real
+refresh: nightly batch
+retention: dev only; rebuildable from seed
+file_format: {type: csv, encoding: utf-8, header: true, delimiter: ","}
+timestamps: ISO 8601, UTC
+out_of_scope: planted-truth table (stored separately; evaluation only)
+
+on_failure:
+  file_level: reject whole file   # missing or extra column, bad header, bad encoding
+  row_level: quarantine row with reason   # type, null, range, pattern, key or rule failure
+
+tables:
+  policies:
+    primary_key: [policy_id]
+    columns:
+      - {name: policy_id, type: string, nullable: false, pii: false, known_at_scoring: true, rule: "^POL-[0-9]{8}$"}
+      - {name: claimant_id, type: string, nullable: false, pii: false, known_at_scoring: true, rule: "FK claimants.claimant_id"}
+      - {name: vehicle_id, type: string, nullable: false, pii: false, known_at_scoring: true, rule: "FK vehicles.vehicle_id"}
+      - {name: policy_start_date, type: date, nullable: false, pii: false, known_at_scoring: true}
+      - {name: policy_end_date, type: date, nullable: false, pii: false, known_at_scoring: true, rule: "> policy_start_date"}
+      - {name: coverage_type, type: string, nullable: false, pii: false, known_at_scoring: true, allowed: [liability, collision, comprehensive]}
+      - {name: annual_premium, type: decimal(10,2), nullable: false, pii: false, known_at_scoring: true, rule: ">= 0"}
+
+  claimants:
+    primary_key: [claimant_id]
+    columns:
+      - {name: claimant_id, type: string, nullable: false, pii: false, known_at_scoring: true, rule: "^CLT-[0-9]{8}$"}
+      - {name: full_name, type: string, nullable: false, pii: true, known_at_scoring: true}
+      - {name: date_of_birth, type: date, nullable: false, pii: true, known_at_scoring: true}
+      - {name: phone, type: string, nullable: true, pii: true, known_at_scoring: true, rule: "^[0-9]{10}$ after normalizing"}
+      - {name: email, type: string, nullable: true, pii: true, known_at_scoring: true}
+      - {name: street_address, type: string, nullable: false, pii: true, known_at_scoring: true}
+      - {name: city, type: string, nullable: false, pii: false, known_at_scoring: true}
+      - {name: postal_code, type: string, nullable: false, pii: true, known_at_scoring: true, rule: "^[A-Z][0-9][A-Z] ?[0-9][A-Z][0-9]$"}
+
+  vehicles:
+    primary_key: [vehicle_id]
+    columns:
+      - {name: vehicle_id, type: string, nullable: false, pii: false, known_at_scoring: true, rule: "^VEH-[0-9]{8}$"}
+      - {name: vin, type: string, nullable: false, pii: true, known_at_scoring: true, rule: "^[A-HJ-NPR-Z0-9]{17}$"}
+      - {name: make, type: string, nullable: false, pii: false, known_at_scoring: true}
+      - {name: model, type: string, nullable: false, pii: false, known_at_scoring: true}
+      - {name: model_year, type: integer, nullable: false, pii: false, known_at_scoring: true, rule: "1990 to 2027"}
+
+  vendors:
+    primary_key: [vendor_id]
+    columns:
+      - {name: vendor_id, type: string, nullable: false, pii: false, known_at_scoring: true, rule: "^VND-[0-9]{6}$"}
+      - {name: vendor_type, type: string, nullable: false, pii: false, known_at_scoring: true, allowed: [tow, repair_shop, clinic]}
+      - {name: vendor_name, type: string, nullable: false, pii: false, known_at_scoring: true}
+      - {name: phone, type: string, nullable: true, pii: false, known_at_scoring: true}
+      - {name: street_address, type: string, nullable: false, pii: false, known_at_scoring: true}
+      - {name: city, type: string, nullable: false, pii: false, known_at_scoring: true}
+
+  claims:
+    primary_key: [claim_id]
+    columns:
+      - {name: claim_id, type: string, nullable: false, pii: false, known_at_scoring: true, rule: "^CLM-[0-9]{9}$"}
+      - {name: policy_id, type: string, nullable: false, pii: false, known_at_scoring: true, rule: "FK policies.policy_id"}
+      - {name: claimant_id, type: string, nullable: false, pii: false, known_at_scoring: true, rule: "FK claimants.claimant_id"}
+      - {name: vehicle_id, type: string, nullable: false, pii: false, known_at_scoring: true, rule: "FK vehicles.vehicle_id"}
+      - {name: loss_datetime, type: timestamp, nullable: false, pii: false, known_at_scoring: true, rule: "within policy period"}
+      - {name: report_datetime, type: timestamp, nullable: false, pii: false, known_at_scoring: true, rule: ">= loss_datetime"}
+      - {name: loss_city, type: string, nullable: false, pii: false, known_at_scoring: true}
+      - {name: claim_type, type: string, nullable: false, pii: false, known_at_scoring: true, allowed: [collision, theft, glass, injury]}
+      - {name: claimed_amount, type: decimal(12,2), nullable: false, pii: false, known_at_scoring: true, rule: ">= 0"}
+      - {name: tow_vendor_id, type: string, nullable: true, pii: false, known_at_scoring: true, rule: "FK vendors where type = tow"}
+      - {name: repair_vendor_id, type: string, nullable: true, pii: false, known_at_scoring: true, rule: "FK vendors where type = repair_shop"}
+      - {name: clinic_vendor_id, type: string, nullable: true, pii: false, known_at_scoring: true, rule: "FK vendors where type = clinic"}
+      - {name: police_report, type: boolean, nullable: false, pii: false, known_at_scoring: true}
+      - {name: status, type: string, nullable: false, pii: false, known_at_scoring: false, allowed: [open, closed_paid, closed_denied]}
+      - {name: fraud_label, type: boolean, nullable: true, pii: false, known_at_scoring: false, note: "set only for investigated claims"}
+
+  payments:
+    primary_key: [payment_id]
+    columns:
+      - {name: payment_id, type: string, nullable: false, pii: false, known_at_scoring: false, rule: "^PAY-[0-9]{9}$"}
+      - {name: claim_id, type: string, nullable: false, pii: false, known_at_scoring: false, rule: "FK claims.claim_id"}
+      - {name: payee_vendor_id, type: string, nullable: true, pii: false, known_at_scoring: false, rule: "FK vendors.vendor_id"}
+      - {name: paid_amount, type: decimal(12,2), nullable: false, pii: false, known_at_scoring: false, rule: "> 0"}
+      - {name: paid_date, type: date, nullable: false, pii: false, known_at_scoring: false, rule: ">= claims.report_datetime"}
