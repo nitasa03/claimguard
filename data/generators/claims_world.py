@@ -5,6 +5,10 @@ Output follows data/contracts/claims_world_v1.yaml. All data is synthetic.
 
 Usage:
     python -m data.generators.claims_world --seed 42 --n-claims 100000 --out .local/claims_world
+
+    # with planted rings (issue #10); truth goes to the config's truth_dir
+    python -m data.generators.claims_world --rings data/generators/config/rings_v1.yaml
+
 """
 
 from __future__ import annotations
@@ -228,9 +232,17 @@ def main() -> None:
     p.add_argument("--n-claims", type=int, default=100_000)
     p.add_argument("--n-policies", type=int, default=60_000)
     p.add_argument("--out", type=Path, default=Path(".local/claims_world"))
+    p.add_argument("--rings", type=Path, help="ring config YAML; plants rings and decoys")
     a = p.parse_args()
     s = Settings(seed=a.seed, n_claims=a.n_claims, n_policies=a.n_policies)
     tables = generate(s)
+    if a.rings:
+        from data.generators.rings import load_config, plant_rings, write_truth
+
+        cfg = load_config(a.rings)
+        truth = plant_rings(tables, cfg, s.seed)
+        write_truth(truth, Path(cfg["truth_dir"]))
+        print(truth["manifest"], "->", cfg["truth_dir"])
     write_csv(tables, a.out)
     print({k: len(v) for k, v in tables.items()}, "->", a.out)
 
