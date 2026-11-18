@@ -237,6 +237,7 @@ data/processed/
 *.parquet
 *.db
 !data/samples/*.csv
+!tests/fixtures/**/*.csv
 logs/
 *.log
 
