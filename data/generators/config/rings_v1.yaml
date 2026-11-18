@@ -1,0 +1,45 @@
+# Planted fraud rings for the synthetic claims world (issue #10, scenario S2).
+# Read by data/generators/rings.py. Synthetic data only.
+# Existing claims are modified in place; contract v1 tables and columns are unchanged.
+# Planted truth is written to truth_dir and used only for evaluation.
+version: "1.0.0"
+contract: claims_world_v1
+seed_offset: 1000            # ring RNG = seed + offset; base data stays identical
+truth_dir: .local/claims_world_truth
+max_ring_claim_share: 0.02   # guard: refuse a config that plants too much
+
+# Ring counts are design assumptions chosen for stable evaluation per size (AT-S2-1)
+# under the prevalence cap; they are not measured real-world prevalence.
+ring_types:
+  staged_collision:
+    description: A small group stages collisions; claims share tow, repair shop and clinic.
+    shape: clique
+    rings_per_size: {3: 40, 5: 25, 10: 12}   # size = claims per ring, one claimant each
+    window_days: 90                          # all claims of a ring fall in this window
+    injury_share: 0.4                        # share of ring claims set to injury (uses clinic)
+    links:                                   # probability a member claim uses the ring's entity
+      tow_vendor: 1.0
+      repair_vendor: 0.9
+      clinic_vendor: 1.0                     # injury claims only
+  shared_identity:
+    description: Different claimants share a phone number or a street address.
+    shape: bipartite
+    rings_per_size: {3: 30, 5: 20, 10: 8}
+    window_days: 180
+    links:
+      phone: 0.7
+      address: 0.5
+      at_least_one: true                     # every member shares a phone or an address
+
+observed_label:
+  fraud_rate_if_investigated: 0.8   # ring claims that were investigated get fraud_label true at this rate
+
+decoys:                             # honest patterns that look suspicious (AT-S2-5)
+  hub_vendor:
+    count: 1
+    vendor_type: tow
+    #min_claims: 2000                # about 9x a normal tow vendor; unrelated claimants
+    degree_multiple: 10             # 10x the average tow vendor's claim count; unrelated claimants
+  shared_household:
+    count: 50                       # honest claimants sharing one address (families)
+    size_range: [2, 4]
