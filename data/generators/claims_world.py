@@ -22,7 +22,7 @@ from pathlib import Path
 
 from faker import Faker
 
-CONTRACT_VERSION = "1.0.0"
+CONTRACT_VERSION = "1.0.1"
 REFERENCE_DATE = date(2026, 1, 1)  # fixed, so ages never depend on today's date
 
 VIN_CHARS = "ABCDEFGHJKLMNPRSTUVWXYZ0123456789"  # no I, O or Q
