@@ -9,6 +9,7 @@ description = "Auto-claims fraud investigation platform (synthetic and public da
 requires-python = ">=3.11"
 dependencies = [
     "faker>=30",
+    "google-cloud-storage>=2.18",
     "pyyaml>=6",
 ]
 
