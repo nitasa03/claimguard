@@ -41,12 +41,15 @@ Source values: synthetic, public_<dataset name>, api_<service name>.
 1. Write once. Corrections arrive as new files, never edits.
 2. Every load has a manifest with: file name, source, source_type
    (synthetic or public), size, SHA-256 checksum, row count for tabular files,
-   ingest time, license note and load id.
+   ingest time, license note and load id. A load that stops partway still writes
+   a manifest for the files it stored, with status "partial" and the error.
 3. Only synthetic and public data are stored. No real personal information.
 4. Public datasets are stored only where their license allows it, and are never
    redistributed. The license note is recorded in the manifest and in the
    source register.
 5. Partition by ingest date, not by the date of the event inside the data.
+   ingest_date and all load times are UTC; a Toronto evening load lands on the
+   next UTC date.
 6. Rejected files are copied to a separate quarantine location with the
    reason; the raw copy is left untouched.
 7. Only pipeline identities write to the bucket. People have read access.

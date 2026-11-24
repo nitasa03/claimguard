@@ -8,6 +8,9 @@ Issue #12. Code: `data/ingestion/ingest_raw.py`. Rules: `docs/data/raw_zone_conv
 - Writes one manifest per load to `_manifests/source=<source>/ingest_date=YYYY-MM-DD/`.
 - Rerun safe: a file with the same SHA-256 already in raw is skipped. Changed content
   gets the next sequence number. Uploads are create-only (`if_generation_match=0`).
+- All files are checked before the first upload. If an upload fails partway, the files
+  already stored get a manifest with `"status": "partial"`; rerun to load the rest.
+- Dates and times are UTC.
 - Planted ring truth is never ingested; it lives in its own folder for evaluation only.
 
 ## Identity (rule 7: only pipeline identities write)
