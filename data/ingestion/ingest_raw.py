@@ -1,4 +1,4 @@
-""" Ingest local files into the raw (bronze) Cloud Storage zone (issue #12).
+"""Ingest local files into the raw (bronze) Cloud Storage zone (issue #12).
 
 Follows docs/data/raw_zone_convention.md: files are stored byte for byte, written once,
 partitioned by ingest date and named <dataset>_<yyyymmdd>_<seq>.<ext>. Each load that
@@ -7,7 +7,9 @@ writes files also writes one manifest (size, SHA-256, row count, license note, l
 A rerun is safe. A file whose SHA-256 is already in raw for the same domain, source and
 dataset is skipped, on any ingest date, so no duplicates are written. Changed content is
 a re-delivery and gets the next sequence number. Every upload is create-only, so an
-existing object is never overwritten.
+existing object is never overwritten. All files are checked before the first upload;
+if an upload fails partway, the files already written still get a manifest marked
+"partial". Dates and times are UTC. Sequence numbers run 001 to 999 per dataset per day.
 
 Usage:
     python -m data.ingestion.ingest_raw --in .local/claims_world --local-root .local/fake_bucket
@@ -193,7 +195,10 @@ def ingest(in_dir: str | Path, store: Store, *, domain: str = "claims_batch",
         if m["day"] == day:
             last_seq[m["ds"]] = max(last_seq.get(m["ds"], 0), int(m["seq"]))
 
-    uploaded, skipped = [], []
+    # Phase 1: work out every file's facts before writing anything, so a bad file
+    # stops the load before the first upload.
+    planned: list[tuple[Path, dict]] = []
+    skipped: list[dict] = []
     for path in files:
         ds, sha = dataset_name(path), sha256_of(path)
         if (ds, sha) in seen:
@@ -203,40 +208,55 @@ def ingest(in_dir: str | Path, store: Store, *, domain: str = "claims_batch",
         seq = last_seq.get(ds, 0) + 1
         last_seq[ds] = seq
         obj = f"{base}ingest_date={ingest_date}/{ds}_{day}_{seq:03d}{ext}"
-        entry = {
+        seen[(ds, sha)] = obj
+        planned.append((path, {
             "object": obj,
             "original_name": path.name,
             "dataset": ds,
             "size_bytes": path.stat().st_size,
             "sha256": sha,
             "row_count": count_csv_rows(path),
-        }
-        if not dry_run:
-            meta = {"dataset": ds, "sha256": sha, "load_id": load_id,
-                    "original_name": path.name, "row_count": str(entry["row_count"])}
-            store.create(obj, path, meta, "text/csv")
-        seen[(ds, sha)] = obj
-        uploaded.append(entry)
+        }))
 
-    manifest = {
-        "manifest_version": MANIFEST_VERSION,
-        "load_id": load_id,
-        "ingest_time": now.isoformat().replace("+00:00", "Z"),
-        "domain": domain,
-        "source": source,
-        "source_type": source_type,
-        "license_note": license_note,
-        "dry_run": dry_run,
-        "files": uploaded,
-        "skipped": skipped,
-        "manifest_object": None,
-    }
-    if uploaded and not dry_run:
-        mobj = f"_manifests/source={source}/ingest_date={ingest_date}/load_{load_id}.json"
-        manifest["manifest_object"] = mobj
-        body = (json.dumps(manifest, indent=2) + "\n").encode("utf-8")
-        store.create(mobj, body, {"load_id": load_id}, "application/json")
-    return manifest
+    # Phase 2: upload. If it stops partway, the files already written still get a
+    # manifest (status "partial"), then the error is raised again.
+    uploaded: list[dict] = []
+
+    def finish(status: str, error: str | None) -> dict:
+        manifest = {
+            "manifest_version": MANIFEST_VERSION,
+            "load_id": load_id,
+            "ingest_time": now.isoformat().replace("+00:00", "Z"),
+            "domain": domain,
+            "source": source,
+            "source_type": source_type,
+            "license_note": license_note,
+            "dry_run": dry_run,
+            "status": status,
+            "error": error,
+            "files": uploaded,
+            "skipped": skipped,
+            "manifest_object": None,
+        }
+        if uploaded and not dry_run:
+            mobj = f"_manifests/source={source}/ingest_date={ingest_date}/load_{load_id}.json"
+            manifest["manifest_object"] = mobj
+            body = (json.dumps(manifest, indent=2) + "\n").encode("utf-8")
+            store.create(mobj, body, {"load_id": load_id}, "application/json")
+        return manifest
+
+    try:
+        for path, entry in planned:
+            if not dry_run:
+                meta = {"dataset": entry["dataset"], "sha256": entry["sha256"],
+                        "load_id": load_id, "original_name": path.name,
+                        "row_count": str(entry["row_count"])}
+                store.create(entry["object"], path, meta, "text/csv")
+            uploaded.append(entry)
+    except Exception as e:
+        finish("partial", f"{type(e).__name__}: {e}")
+        raise
+    return finish("complete", None)
 
 
 # --- command line --------------------------------------------------------------------

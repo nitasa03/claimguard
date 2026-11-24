@@ -5,7 +5,7 @@ for the bucket, so these tests need no cloud access."""
 import hashlib
 import json
 import re
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 
@@ -15,8 +15,8 @@ DAY1 = datetime(2026, 11, 19, 15, 30, tzinfo=UTC)
 LAYOUT = re.compile(
     r"^claims_batch/source=synthetic/ingest_date=\d{4}-\d{2}-\d{2}/[a-z0-9_]+_\d{8}_\d{3}\.csv$")
 MANIFEST_KEYS = {"manifest_version", "load_id", "ingest_time", "domain", "source",
-                 "source_type", "license_note", "dry_run", "files", "skipped",
-                 "manifest_object"}
+                 "source_type", "license_note", "dry_run", "status", "error", "files",
+                 "skipped", "manifest_object"}
 FILE_KEYS = {"object", "original_name", "dataset", "size_bytes", "sha256", "row_count"}
 
 
@@ -42,7 +42,22 @@ def data_objects(store):
 
 
 def manifests(store):
-    return [k for k in store.list_objects("_manifests/")]
+    return list(store.list_objects("_manifests/"))
+
+
+class FailingStore(LocalStore):
+    """A local bucket whose data upload number `fail_on` breaks, like a dropped network."""
+
+    def __init__(self, root, fail_on):
+        super().__init__(root)
+        self.fail_on, self.data_writes = fail_on, 0
+
+    def create(self, name, data, metadata, content_type):
+        if not name.startswith("_manifests/"):
+            self.data_writes += 1
+            if self.data_writes == self.fail_on:
+                raise ConnectionError("network dropped")
+        super().create(name, data, metadata, content_type)
 
 
 def test_first_load_follows_layout_and_keeps_bytes(src, store):
@@ -66,6 +81,7 @@ def test_manifest_has_every_required_field(src, store):
     assert json.loads((store.root / m["manifest_object"]).read_text("utf-8")) == m
     assert m["ingest_time"] == "2026-11-19T15:30:00Z"
     assert m["source_type"] == "synthetic" and m["license_note"]
+    assert m["status"] == "complete" and m["error"] is None
     by_name = {f["original_name"]: f for f in m["files"]}
     assert all(set(f) == FILE_KEYS for f in m["files"])
     assert by_name["claims.csv"]["row_count"] == 3  # quoted line break stays in one row
@@ -174,3 +190,43 @@ def test_command_line_needs_a_target(src, monkeypatch):
     monkeypatch.delenv("CLAIMGUARD_RAW_BUCKET", raising=False)
     with pytest.raises(SystemExit):
         main(["--in", str(src)])
+
+
+def test_interrupted_load_still_gets_a_partial_manifest(src, tmp_path):
+    root = tmp_path / "bucket"
+    with pytest.raises(ConnectionError):
+        ingest(src, FailingStore(root, fail_on=2), now=DAY1, load_id="L1")
+    store = LocalStore(root)
+    partial = json.loads((store.root / manifests(store)[0]).read_text("utf-8"))
+    assert partial["status"] == "partial" and "network dropped" in partial["error"]
+    assert [f["original_name"] for f in partial["files"]] == ["claims.csv"]
+
+    retry = ingest(src, store, now=DAY1 + timedelta(minutes=5), load_id="L2")
+    assert retry["status"] == "complete"
+    assert [f["original_name"] for f in retry["files"]] == ["vendors.csv"]
+    assert [s["original_name"] for s in retry["skipped"]] == ["claims.csv"]
+    # every stored data file appears in exactly one manifest
+    receipts = [json.loads((store.root / k).read_text("utf-8")) for k in manifests(store)]
+    listed = sorted(f["object"] for r in receipts for f in r["files"])
+    assert listed == sorted(data_objects(store))
+
+
+def test_failure_on_first_upload_writes_no_manifest(src, tmp_path):
+    root = tmp_path / "bucket"
+    with pytest.raises(ConnectionError):
+        ingest(src, FailingStore(root, fail_on=1), now=DAY1)
+    assert LocalStore(root).list_objects("") == {}
+
+
+def test_bad_file_is_caught_before_any_upload(src, store):
+    (src / "~~~.csv").write_text("x\n1\n", "utf-8")  # sorts after the good files
+    with pytest.raises(ValueError, match="dataset name"):
+        ingest(src, store, now=DAY1)
+    assert store.list_objects("") == {}
+
+
+def test_evening_in_toronto_is_the_next_utc_day(src, store):
+    toronto_evening = datetime(2026, 11, 19, 23, 59, tzinfo=timezone(timedelta(hours=-5)))
+    m = ingest(src, store, now=toronto_evening)
+    assert m["ingest_time"] == "2026-11-20T04:59:00Z"
+    assert m["files"][0]["object"].endswith("ingest_date=2026-11-20/claims_20261120_001.csv")
